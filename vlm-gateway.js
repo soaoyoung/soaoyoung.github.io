@@ -60,40 +60,106 @@
     }
     return {result,usage:{promptTokenCount:data.usage?.input_tokens||0,candidatesTokenCount:data.usage?.output_tokens||0,thoughtsTokenCount:data.usage?.output_tokens_details?.reasoning_tokens||0}};
   }
-  function createClient(fetcher = (...args)=>fetch(...args)) {
-    let apiKey = '', verified = false, controller = null, verifying = null, generation = 0;
+  function browserCredentialStore() {
+    if (typeof indexedDB === 'undefined') return null;
+    async function transaction(mode, operation) {
+      const db = await new Promise((resolve,reject)=>{
+        const opening=indexedDB.open('smart-material-vlm-vault',1);
+        let settled=false;
+        const timer=setTimeout(()=>{settled=true;reject(Error('암호화 저장소를 열 수 없습니다. 브라우저 저장 권한을 확인하세요.'));},10000);
+        opening.onupgradeneeded=()=>{if(!opening.result.objectStoreNames.contains('credentials'))opening.result.createObjectStore('credentials');};
+        opening.onsuccess=()=>{clearTimeout(timer);if(settled){opening.result.close();return;}settled=true;resolve(opening.result);};
+        opening.onerror=()=>{clearTimeout(timer);settled=true;reject(Error('브라우저 암호화 저장소를 열 수 없습니다.'));};
+        opening.onblocked=()=>{clearTimeout(timer);settled=true;reject(Error('다른 탭에서 저장소를 사용 중입니다. 잠시 후 다시 연결하세요.'));};
+      });
+      return new Promise((resolve,reject)=>{
+        let tx, request, result;
+        try {tx=db.transaction('credentials',mode);request=operation(tx.objectStore('credentials'));}catch(_){db.close();reject(Error('브라우저 암호화 저장소에 접근할 수 없습니다.'));return;}
+        request.onsuccess=()=>{result=request.result;};
+        tx.oncomplete=()=>{db.close();resolve(result);};
+        tx.onerror=tx.onabort=()=>{db.close();reject(Error('암호화 저장을 완료하지 못했습니다. 브라우저 저장 공간과 권한을 확인하세요.'));};
+      });
+    }
+    return {get:()=>transaction('readonly',s=>s.get('factchat')),put:record=>transaction('readwrite',s=>s.put(record,'factchat')),remove:()=>transaction('readwrite',s=>s.delete('factchat'))};
+  }
+  function createCredentialVault(store=browserCredentialStore(), cryptoApi=globalThis.crypto, origin=globalThis.location?.origin||'test') {
+    if (!store || !cryptoApi?.subtle || !cryptoApi?.getRandomValues) return null;
+    const additionalData=new TextEncoder().encode('smart-material-vlm-v1|'+origin+'|'+BASE_URL+'|'+MODEL);
+    let queue=Promise.resolve();
+    const serial=operation=>{const pending=queue.then(operation);queue=pending.catch(()=>{});return pending;};
+    return {
+      save:secret=>serial(async()=>{
+        const key=await cryptoApi.subtle.generateKey({name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+        const iv=cryptoApi.getRandomValues(new Uint8Array(12));
+        const ciphertext=await cryptoApi.subtle.encrypt({name:'AES-GCM',iv,additionalData},key,new TextEncoder().encode(secret));
+        await store.put({version:1,key,iv,ciphertext,savedAt:Date.now()});
+      }),
+      load:()=>serial(async()=>{
+        const record=await store.get();
+        if (!record) return null;
+        if(record.version!==1||record.key?.type!=='secret'||record.key.extractable!==false||record.key.algorithm?.name!=='AES-GCM'||record.key.algorithm.length!==256||record.iv?.byteLength!==12||!record.ciphertext||record.ciphertext.byteLength<16||record.ciphertext.byteLength>4096)throw Error('저장된 VLM 키가 손상되었습니다. 키를 다시 연결하세요.');
+        try {
+          const plaintext=await cryptoApi.subtle.decrypt({name:'AES-GCM',iv:record.iv,additionalData},record.key,record.ciphertext);
+          return new TextDecoder('utf-8',{fatal:true}).decode(plaintext);
+        } catch (_) { throw Error('저장된 VLM 키를 복원할 수 없습니다. 키를 다시 연결하세요.'); }
+      }),
+      clear:()=>serial(()=>store.remove())
+    };
+  }
+  function createClient(fetcher = (...args)=>fetch(...args), options={}) {
+    const vault=Object.hasOwn(options,'vault')?options.vault:createCredentialVault();
+    let apiKey = '', verified = false, stored=false, controller = null, verifying = null, generation = 0;
     const sanitize = value => {
       const valueText = String(value || '');
       return apiKey ? valueText.split(apiKey).join('[숨김]') : valueText;
     };
     function setKey(value) {
       const next = String(value || '').trim();
-      if (!next || /[\s\r\n]/.test(next)) throw Error('올바른 API 키를 입력하세요.');
-      cancel(); apiKey=next; verified=false; generation++; verifying=null;
+      if (!next || next.length>2048 || /[\s\r\n]/.test(next)) throw Error('올바른 API 키를 입력하세요.');
+      cancel(); apiKey=next; verified=false; stored=false; generation++; verifying=null;
     }
-    function clearKey() { cancel(); apiKey=''; verified=false; generation++; verifying=null; }
-    function status() { return {configured:!!apiKey,verified,model:MODEL,baseUrl:BASE_URL}; }
+    async function clearKey() { cancel(); apiKey=''; verified=false;stored=false;generation++;verifying=null;if(vault)await vault.clear(); }
+    function status() { return {configured:!!apiKey,verified,stored,canRemember:!!vault,model:MODEL,baseUrl:BASE_URL}; }
+    async function saveKey(remember=true) {
+      if(!remember){if(vault)await vault.clear();stored=false;return status();}
+      if(!verified||!apiKey)throw Error('연결 확인을 마친 키만 저장할 수 있습니다.');
+      if(!vault)throw Error('이 브라우저는 암호화 저장을 지원하지 않습니다. 연결은 현재 탭에서 사용할 수 있습니다.');
+      const savingGeneration=generation;
+      await vault.save(apiKey);
+      if(savingGeneration!==generation)throw Error('연결 설정이 변경되었습니다. 저장 상태를 다시 확인하세요.');
+      stored=true;return status();
+    }
+    async function restoreKey() {
+      if(!vault||apiKey)return status();
+      const restoringGeneration=generation;
+      let restored;
+      try {restored=await vault.load();}catch(error){if(restoringGeneration===generation)await vault.clear();throw error;}
+      if(restoringGeneration!==generation||!restored)return status();
+      setKey(restored);stored=true;return status();
+    }
     function cancel() { if (controller) controller.abort(); }
     async function request(endpoint, options = {}, timeout = 180000) {
       if (!apiKey) throw Error('VLM 연결 설정에서 FactChat API 키를 입력하세요.');
+      const requestKey=apiKey;
+      const redact=value=>sanitize(String(value||'').split(requestKey).join('[숨김]'));
       const abort = new AbortController();
       controller = abort;
       const timer = setTimeout(()=>abort.abort(), timeout);
       try {
-        const response = await fetcher(BASE_URL+endpoint,{...options,headers:{'Content-Type':'application/json','x-api-key':apiKey},signal:abort.signal,mode:'cors',credentials:'omit',redirect:'error',cache:'no-store',referrerPolicy:'no-referrer'});
+        const response = await fetcher(BASE_URL+endpoint,{...options,headers:{'Content-Type':'application/json','x-api-key':requestKey},signal:abort.signal,mode:'cors',credentials:'omit',redirect:'error',cache:'no-store',referrerPolicy:'no-referrer'});
         let data;
         try { data = await response.json(); } catch (_) { throw Error('게이트웨이 응답을 읽을 수 없습니다.'); }
         if (!response.ok) {
-          if (response.status===401) { verified=false; throw Error('API 키가 유효하지 않습니다. 이 FactChat 게이트웨이에서 발급한 키인지 확인하세요.'); }
+          if (response.status===401) { await clearKey(); throw Error('API 키가 유효하지 않습니다. 이 FactChat 게이트웨이에서 발급한 키인지 확인하세요.'); }
           if (response.status===403) throw Error('이 키에 gpt-6-sol 사용 권한이 없습니다. 기관의 모델 권한과 잔여 크레딧을 확인하세요.');
           if (response.status===429) throw Error('요청 한도 또는 크레딧 한도에 도달했습니다. 자동 재요청하지 않습니다.');
-          throw Error('게이트웨이 오류 '+response.status+': '+sanitize(data.error?.message || data.detail || data.message || '요청 실패').slice(0,400));
+          throw Error('게이트웨이 오류 '+response.status+': '+redact(data.error?.message || data.detail || data.message || '요청 실패').slice(0,400));
         }
         return data;
       } catch (error) {
         if (error.name==='AbortError') throw Error('분석 또는 연결 확인이 취소되었거나 제한 시간을 초과했습니다. 자동 재요청하지 않습니다.');
         if (error instanceof TypeError) throw Error('게이트웨이에 연결하지 못했습니다. 네트워크 또는 브라우저의 요청 차단 여부를 확인하세요.');
-        throw Error(sanitize(error.message));
+        throw Error(redact(error.message));
       } finally { clearTimeout(timer); if (controller===abort) controller=null; }
     }
     async function verify() {
@@ -115,7 +181,7 @@
       const data=await request('/responses/',{method:'POST',body:JSON.stringify(requestFor(mode,image,context))});
       return parseResponse(data,mode);
     }
-    return {setKey,clearKey,status,verify,analyze,cancel};
+    return {setKey,clearKey,status,verify,analyze,cancel,saveKey,restoreKey};
   }
-  return {BASE_URL,MODEL,schemaFor,requestFor,parseResponse,createClient};
+  return {BASE_URL,MODEL,schemaFor,requestFor,parseResponse,createClient,createCredentialVault};
 });
