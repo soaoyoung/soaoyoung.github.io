@@ -176,6 +176,10 @@
   if(!f?.schedule)errors.push('공정표를 추가해 주세요.');if(!f?.delivery)errors.push('자재반입표를 추가해 주세요.');
   if(!state.tasks.length)errors.push('공정표에서 읽은 자재 사용 수량이 없습니다. 미산정 행의 수량·규격을 확인해 주세요.');
   const p={...state,materials:{},tasks:[],deliveries:[],lots:[],fileModel:true,deliveryAuto:false,supplyMode:'start'},resources=new Map();
+  const boundary=state.zones.find(z=>z.type==='site');
+  const outside=boundary?state.zones.filter(z=>z.type==='storage'&&E.validPolygon(z.polygon)&&!E.contained(z.polygon,boundary.polygon)):[];
+  const outsideIds=new Set(outside.map(z=>z.id));p.zones=state.zones.filter(z=>!outsideIds.has(z.id));
+  if(outside.length)warnings.push('현장 경계 밖 야적 후보는 계산에서 제외: '+outside.map(z=>z.name).join(' · ')+'. 지도 원본은 유지합니다.');
   const rows=[...state.tasks,...state.deliveries];
   const groupNames={rebar:'철근',formwork:'거푸집',shoring:'동바리'};
   for(const r of rows){
@@ -186,7 +190,7 @@
    const oldUnit=state.materials[group]?.unit,weight=r.unitWeightKg>0?r.unitWeightKg:(r.unit==='kg'?1:r.unit==='t'?1000:group==='rebar'?(state.quantityBasis?.rebar_bundle_kg||1000):group==='formwork'?25:15);
    const oldWeight=oldUnit==='kg'?1:oldUnit==='t'?1000:group==='rebar'?(state.quantityBasis?.rebar_bundle_kg||1000):group==='formwork'?25:15;
    let density=ref.length?ref.reduce((s,l)=>s+E.area(l.polygon),0)/ref.reduce((s,l)=>s+l.quantity,0)*(oldUnit===r.unit?1:weight/oldWeight):null;
-   if(!(density>0)){const slots=E.slotsFor(state.zones.map(z=>({...z,confirmed:true})));const smallest=slots.length?Math.min(...slots.map(s=>E.area(s.polygon))):100;const largest=Math.max(1,...rows.filter(x=>key(x)===k).map(x=>x.quantity));density=smallest*.35/largest;}
+   if(!(density>0)){const slots=E.slotsFor(p.zones.map(z=>({...z,confirmed:true})));const smallest=slots.length?Math.min(...slots.map(s=>E.area(s.polygon))):100;const largest=Math.max(1,...rows.filter(x=>key(x)===k).map(x=>x.quantity));density=smallest*.35/largest;}
    const b=ref.length?E.bbox(ref[0].polygon):{w:1,h:1};
    p.materials[id]={name:(r.itemId==='rebar'?'철근':r.itemId==='euroform'?'유로폼':groupNames[group])+' '+r.spec,quantity:0,unit:r.unit,group,itemId:r.itemId,spec:r.spec,lengthMm:r.lengthMm,density,aspect:b.w/b.h,unitWeightKg:weight};
   }
@@ -195,7 +199,7 @@
   for(const r of state.deliveries){const resource=resourceFor(r);p.deliveries.push({...r,material:resource});p.materials[resource].quantity+=r.quantity;}
   for(const l of state.lots.filter(l=>l.state==='stored'&&l.quantity>0)){
    const originalUnit=l.unit||state.materials[l.type]?.unit,resource=resources.get(key({...l,unit:originalUnit}));
-   if(!resource)continue;p.lots.push({...l,type:resource,unit:originalUnit});p.materials[resource].quantity+=l.quantity;
+   if(!resource)continue;if(!p.zones.some(z=>z.type==='storage'&&E.contained(l.polygon,z.polygon))){warnings.push(l.name+': 적치 위치 확인 전 재고 차감에서 제외합니다.');continue;}p.lots.push({...l,type:resource,unit:originalUnit});p.materials[resource].quantity+=l.quantity;
   }
   for(const [id,m] of Object.entries(p.materials)){
    const needs=p.tasks.filter(t=>t.material===id),dels=p.deliveries.filter(d=>d.material===id);
