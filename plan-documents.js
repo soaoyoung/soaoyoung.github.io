@@ -84,7 +84,8 @@
   const quantity=num(get(row,m,'quantity')),u=unit(get(row,m,'unit'));
   const totalWeight=num(get(row,m,'totalWeight')),unitWeightKg=num(get(row,m,'weight'))??(quantity>0&&totalWeight>0?totalWeight/quantity:null);
   const status=String(get(row,m,'status')||'');
-  return {id:'',zone:building?'B-'+building:'',building,phase,name:phase||String(itemText||'자재'),...selected,material:selected?.material||'rebar',itemId:selected?.itemId||'',spec:selected?.spec||String(specText||''),unit:u,quantity,day:day(get(row,m,'start')),endDay:day(get(row,m,'end')),arrivalDay:day(get(row,m,'arrival')),returnDay:day(get(row,m,'returnDay')),lengthMm:num(get(row,m,'length')),unitWeightKg,originalSpec:String(specText||''),source:context.source,
+  const supplyLength=selected?.material==='rebar'?(String(specText||'').match(/공급\s*길이\s*[:：]?\s*([\d,]+)\s*mm/i)||[])[1]:null;
+  return {id:'',zone:building?'B-'+building:'',building,phase,name:phase||String(itemText||'자재'),...selected,material:selected?.material||'rebar',itemId:selected?.itemId||'',spec:selected?.spec||String(specText||''),unit:u,quantity,day:day(get(row,m,'start')),endDay:day(get(row,m,'end')),arrivalDay:day(get(row,m,'arrival')),returnDay:day(get(row,m,'returnDay')),lengthMm:num(get(row,m,'length'))??num(supplyLength),unitWeightKg,originalSpec:String(specText||''),source:context.source,
    included:!!selected&&quantity!=null&&!/미산정|미등록|제외/.test(status),issue:!selected?'등록 품목·규격 불일치':quantity==null?'수량 미산정':!u?'단위 확인 필요':null};
  }
  function tables(sheet){
