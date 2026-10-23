@@ -11,10 +11,27 @@
   function inside(p,poly,boundary=true){let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if(onSegment(p,a,b))return boundary;if((a[1]>p[1])!==(b[1]>p[1])&&p[0]<(b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1])+a[0])c=!c;}return c;}
   function cross(a,b,c){return (b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);}
   function properIntersect(a,b,c,d){return cross(a,b,c)*cross(a,b,d)<-1e-8&&cross(c,d,a)*cross(c,d,b)<-1e-8;}
-  function overlaps(a,b){if(a.some(p=>inside(p,b,false))||b.some(p=>inside(p,a,false)))return true;for(let i=0;i<a.length;i++)for(let j=0;j<b.length;j++)if(properIntersect(a[i],a[(i+1)%a.length],b[j],b[(j+1)%b.length]))return true;return inside(center(a),b,false)||inside(center(b),a,false);}
+  function overlaps(a,b){if(a.some(p=>inside(p,b,false))||b.some(p=>inside(p,a,false)))return true;for(let i=0;i<a.length;i++)for(let j=0;j<b.length;j++)if(properIntersect(a[i],a[(i+1)%a.length],b[j],b[(j+1)%b.length]))return true;const ca=center(a),cb=center(b);return (inside(ca,a,false)&&inside(ca,b,false))||(inside(cb,b,false)&&inside(cb,a,false));}
   function contained(a,b){if(!a.every(p=>inside(p,b)))return false;for(let i=0;i<a.length;i++)for(let j=0;j<b.length;j++)if(properIntersect(a[i],a[(i+1)%a.length],b[j],b[(j+1)%b.length]))return false;return true;}
   function validPolygon(p){if(!(Array.isArray(p)&&p.length>=3&&p.length<=100&&p.every(q=>Array.isArray(q)&&q.length===2&&q.every(v=>Number.isFinite(v)&&v>=0&&v<=1000))&&area(p)>1))return false;for(let i=0;i<p.length;i++){if(p[i][0]===p[(i+1)%p.length][0]&&p[i][1]===p[(i+1)%p.length][1])return false;for(let j=i+1;j<p.length;j++){if(j===i+1||(i===0&&j===p.length-1))continue;if(properIntersect(p[i],p[(i+1)%p.length],p[j],p[(j+1)%p.length]))return false;}}return true;}
-  function slotsFor(zones){const slots=[];for(const z of zones.filter(z=>z.type==='storage'&&z.confirmed)){const b=bbox(z.polygon),front=z.front||'south';for(let col=0;col<3;col++)for(let depth=0;depth<2;depth++){let x,y,w,h;if(front==='west'||front==='east'){w=b.w/2;h=b.h/3;x=b.x+(front==='west'?depth:1-depth)*w;y=b.y+col*h;}else{w=b.w/3;h=b.h/2;x=b.x+col*w;y=b.y+(front==='north'?depth:1-depth)*h;}const p=rect(x+1,y+1,w-2,h-2);if(validPolygon(p)&&contained(p,z.polygon))slots.push({id:z.id+':'+col+':'+depth,zone:z.id,col,depth,polygon:p,b:bbox(p)});}}return slots;}
+  function slotsFor(zones){
+    const slots=[];
+    for(const z of zones.filter(z=>z.type==='storage'&&z.confirmed)){
+      const b=bbox(z.polygon),front=z.front||'south';
+      for(let col=0;col<3;col++)for(let depth=0;depth<2;depth++){
+        let x,y,w,h;
+        if(front==='west'||front==='east'){w=b.w/2;h=b.h/3;x=b.x+(front==='west'?depth:1-depth)*w;y=b.y+col*h;}
+        else{w=b.w/3;h=b.h/2;x=b.x+col*w;y=b.y+(front==='north'?depth:1-depth)*h;}
+        let poly=rect(x+1,y+1,w-2,h-2);
+        if(!contained(poly,z.polygon)){
+          const c=[x+w/2,y+h/2];if(!inside(c,z.polygon,false))continue;
+          let scale=.9;
+          while(scale>.08){const sw=(w-2)*scale,sh=(h-2)*scale;poly=rect(c[0]-sw/2,c[1]-sh/2,sw,sh);if(contained(poly,z.polygon))break;scale*=.85;}
+        }
+        if(validPolygon(poly)&&contained(poly,z.polygon))slots.push({id:z.id+':'+col+':'+depth,zone:z.id,col,depth,polygon:poly,b:bbox(poly)});
+      }
+    }return slots;
+  }
   function fit(lot,slot){const b=lot._b||bbox(lot.polygon);return b.w<=slot.b.w+.01&&b.h<=slot.b.h+.01;}
   function pose(lot,slot,ratio=1){const b=bbox(lot.polygon),r=Math.sqrt(Math.max(0,ratio));return rect(slot.b.x+(slot.b.w-b.w*r)/2,slot.b.y+(slot.b.h-b.h*r)/2,b.w*r,b.h*r);}
   function zoneOf(poly,zones){const c=center(poly);return zones.find(z=>z.type==='storage'&&contained(poly,z.polygon))?.id||zones.find(z=>z.type==='storage'&&inside(c,z.polygon))?.id||'';}
