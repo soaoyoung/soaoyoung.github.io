@@ -60,7 +60,7 @@
    sheets.push({name:a.name,rows:filled,originalRows:rows});
   }if(!sheets.length)throw Error('읽을 수 있는 엑셀 시트가 없습니다.');return sheets;
  }
- const aliases={building:['동','건물','대상동','사용동','사용동·공정','지도구역','zone','building'],phase:['공정','공정명','작업','작업명','사용공정','사용동·공정','name','phase'],start:['착수WD','사용착수WD','세부사용시작WD','사용시작WD','시작WD','day','startWD','start'],end:['완료WD','사용완료WD','종료WD','endDay','endWD','end'],arrival:['반입WD','반입일예정WD','반입일','입고일','arrivalWD','deliveryWD','arrivalDay'],quantity:['반영수량','사용계획량','투입량','반입량계획','반입량','수량','수요개수','quantity','qty'],item:['등록품목','품목','품명','원자료품목','item','itemId'],spec:['등록규격','규격','계획규격','원자료규격','spec'],unit:['단위','unit'],length:['철근길이mm','길이mm','길이','lengthMm'],returnDay:['회수WD','회수일','returnDay'],status:['대조결과','물량반영','상태','status'],weight:['단위중량kg','unitWeightKg'],totalWeight:['자재중량kg','총중량kg']};
+ const aliases={building:['동','건물','대상동','사용동','사용동·공정','지도구역','zone','building'],phase:['공정','공정명','작업','작업명','사용공정','사용동·공정','name','phase'],start:['착수WD','사용착수WD','세부사용시작WD','사용시작WD','시작WD','day','startWD','start'],end:['완료WD','사용완료WD','종료WD','endDay','endWD','end'],arrival:['적용반입WD','반입일적용WD','반입WD','반입일예정WD','반입일','입고일','arrivalWD','deliveryWD','arrivalDay'],quantity:['반영수량','사용계획량','투입량','반입량계획','반입량','수량','수요개수','quantity','qty'],item:['등록품목','품목','품명','원자료품목','item','itemId'],spec:['등록규격','규격','계획규격','원자료규격','spec'],unit:['단위','unit'],length:['철근길이mm','길이mm','길이','lengthMm'],returnDay:['회수WD','회수일','returnDay'],status:['대조결과','물량반영','상태','status'],weight:['단위중량kg','unitWeightKg'],totalWeight:['자재중량kg','총중량kg']};
  function mapping(row){const values=(row||[]).map(norm),m={};for(const [k,list] of Object.entries(aliases)){for(const a of list){const j=values.indexOf(norm(a));if(j>=0){m[k]=j;break;}}}return m;}
  function get(row,m,key){return m[key]==null?null:row[m[key]];}
  function bldg(value){const s=String(value??'');return (s.match(/(?:B-)?(10[1-9]|11[0-3])(?:동)?/)||[])[1]||'';}
@@ -112,6 +112,38 @@
   }
   return {phases,usage,arrivals,issues,recognized};
  }
+ function progressDocument(sheets,kind,MC){
+  for(const sheet of sheets){
+   const i=sheet.rows.findIndex(row=>(row||[]).some(v=>norm(v)==='적용반입wd')&&(row||[]).some(v=>norm(v)==='현재야적량')&&(row||[]).some(v=>norm(v)==='가정기성률'));
+   if(i<0)continue;
+   const header=sheet.rows[i],m=mapping(header),col=name=>header.findIndex(v=>norm(v)===norm(name));
+   const cutoff=(sheet.originalRows||sheet.rows).find(row=>norm(row?.[0])==='기준wd');
+   const asOfDay=num(cutoff?.[1]);if(!Number.isInteger(asOfDay)||asOfDay<0||asOfDay>120)continue;
+   const rows=[],issues=[];let excluded=0;
+   for(let n=i+1;n<sheet.rows.length;n++){
+    const row=(sheet.originalRows||sheet.rows)[n]||[];
+    if(!Number.isInteger(num(row[0]))||!bldg(get(row,m,'building')))continue;
+    const r=normalizeRow(row,m,{source:sheet.name+'!'+(n+1)},MC);
+    if(!r.included){excluded++;continue;}
+    r.reportedReceived=num(row[col('기반입량')]);r.reportedUsed=num(row[col('기불출량')]);r.reportedStock=num(row[col('현재야적량')]);
+    rows.push(kind==='delivery'?{...r,day:r.arrivalDay,kind:'arrival'}:r);
+   }
+   if(!rows.length)continue;
+   if(excluded)issues.push('등록 규격과 일치하지 않는 '+excluded+'개 원자료 행은 미산정으로 유지합니다.');
+   return {rows,progress:{asOfDay,method:'period-rounded',synthetic:true,source:sheet.name},issues};
+  }
+  return null;
+ }
+ function portions(r){
+  if(!Number.isInteger(r.day)||!Number.isInteger(r.endDay??r.day)||r.endDay<r.day)return [];
+  const end=r.endDay??r.day,n=end-r.day+1,scale=Number.isInteger(r.quantity)?1:1000,out=[];let previous=0;
+  for(let d=r.day;d<=end;d++){
+   const cumulative=d===end?r.quantity:Math.round(r.quantity*(d-r.day+1)/n*scale)/scale;
+   const q=Number((cumulative-previous).toFixed(6));previous=cumulative;
+   if(q>0)out.push({...r,id:r.id+'-WD-'+d,day:d,endDay:d,quantity:q});
+  }
+  return out;
+ }
  function parseBook(sheets,kind,MC,selectedSheet){
   const scans=sheets.filter(s=>!selectedSheet||s.name===selectedSheet).map(s=>({sheet:s,...scan(s,kind,MC)}));
   const best=(field)=>scans.slice().sort((a,b)=>{const score=x=>x[field].length*2+(/원자료|마스터|요약|총괄|산출/.test(x.sheet.name)?-100:0)+(/자재수불부|공정별자재사용|공정별자재/.test(x.sheet.name)?40:0);return score(b)-score(a);})[0];
@@ -121,9 +153,11 @@
    if(!phases.length){const seen=new Set();for(const r of usage){const key=r.zone+'|'+r.phase+'|'+r.day+'|'+r.endDay;if(!seen.has(key)&&r.day!=null){seen.add(key);phases.push({id:'P-'+phases.length,zone:r.zone,name:r.phase,day:r.day,endDay:r.endDay??r.day,source:r.source});}}}
   }else{const a=best('arrivals');arrivals=a?.arrivals||[];issues=a?.issues||[];}
   if(!selectedSheet&&sheets.every(s=>/^PDF /.test(s.name))){phases=scans.flatMap(s=>s.phases);usage=scans.flatMap(s=>s.usage);arrivals=scans.flatMap(s=>s.arrivals);issues=scans.flatMap(s=>s.issues);for(const s of scans)if(!s.recognized&&s.sheet.rows.some(r=>r?.length))issues.push(s.sheet.name+': 표 열을 확인하지 못했습니다. VLM으로 전체 문서를 읽을 수 있습니다.');}
+  const progressed=!selectedSheet?progressDocument(sheets,kind,MC):null;
+  if(progressed){if(kind==='schedule')usage=progressed.rows;else arrivals=progressed.rows;issues=progressed.issues;}
   if(phases.length>200||usage.length>MAX||arrivals.length>MAX)throw Error('공정은 200개, 규격별 자재 행은 600개까지 추가할 수 있습니다.');
   phases.forEach((r,i)=>r.id='FP-'+(i+1));usage.forEach((r,i)=>r.id='FU-'+(i+1));arrivals.forEach((r,i)=>r.id='FD-'+(i+1));
-  return {kind,phases,usage,arrivals,issues:[...new Set(issues)],sheets:sheets.map(s=>s.name),parsedSheets:scans.filter(s=>s.recognized).map(s=>s.sheet.name)};
+  return {kind,phases,usage,arrivals,progress:progressed?.progress||null,issues:[...new Set(issues)],sheets:sheets.map(s=>s.name),parsedSheets:scans.filter(s=>s.recognized).map(s=>s.sheet.name)};
  }
  function parseMapped(sheet,headerRow,m,kind,MC){
   const phases=[],usage=[],arrivals=[],issues=[];for(let i=headerRow;i<sheet.rows.length;i++){
@@ -180,6 +214,9 @@
   const boundary=state.zones.find(z=>z.type==='site');
   const outside=boundary?state.zones.filter(z=>z.type==='storage'&&E.validPolygon(z.polygon)&&!E.contained(z.polygon,boundary.polygon)):[];
   const outsideIds=new Set(outside.map(z=>z.id));p.zones=state.zones.filter(z=>!outsideIds.has(z.id));
+  const scoped=state.planningScope?.enabled&&Array.isArray(state.planningScope.candidateIds);
+  if(scoped){const ids=new Set(state.planningScope.candidateIds);p.zones=p.zones.filter(z=>z.type!=='storage'||ids.has(z.id)).map(z=>z.type==='storage'?{...z,slotColumns:4,slotDepths:4}:z);warnings.push('104·105·112·113동 주변 '+p.zones.filter(z=>z.type==='storage').length+'개 야적 후보로 계산합니다.');}
+  const periodProgress=f.schedule?.progress?.method==='period-rounded';
   if(outside.length)warnings.push('현장 경계 밖 야적 후보는 계산에서 제외: '+outside.map(z=>z.name).join(' · ')+'. 지도 원본은 유지합니다.');
   const rows=[...state.tasks,...state.deliveries];
   const groupNames={rebar:'철근',formwork:'거푸집',shoring:'동바리'};
@@ -196,7 +233,7 @@
    p.materials[id]={name:(r.itemId==='rebar'?'철근':r.itemId==='euroform'?'유로폼':groupNames[group])+' '+r.spec,quantity:0,unit:r.unit,group,itemId:r.itemId,spec:r.spec,lengthMm:r.lengthMm,density,aspect:b.w/b.h,unitWeightKg:weight};
   }
   const resourceFor=r=>resources.get(key(r));
-  for(const r of state.tasks){const resource=resourceFor(r);p.tasks.push({...r,material:resource});}
+  for(const r of state.tasks){const resource=resourceFor(r);const tasks=periodProgress?portions(r):[r];for(const t of tasks)p.tasks.push({...t,material:resource});}
   for(const r of state.deliveries){const resource=resourceFor(r);p.deliveries.push({...r,material:resource});p.materials[resource].quantity+=r.quantity;}
   for(const l of state.lots.filter(l=>l.state==='stored'&&l.quantity>0)){
    const originalUnit=l.unit||state.materials[l.type]?.unit,resource=resources.get(key({...l,unit:originalUnit}));
@@ -207,13 +244,16 @@
    const dates=[...new Set(needs.map(t=>t.day))].sort((a,b)=>a-b);for(const d of dates){if(!Number.isInteger(d))continue;const needed=needs.filter(t=>t.day<=d).reduce((s,t)=>s+t.quantity,0),arrived=dels.filter(t=>Number.isInteger(t.day)&&t.day<=d).reduce((s,t)=>s+t.quantity,0)+p.lots.filter(l=>l.type===id).reduce((s,l)=>s+l.quantity,0)+needs.filter(t=>t.returnDay!=null&&t.returnDay<=d).reduce((s,t)=>s+t.quantity,0);if(needed>arrived+1e-6){errors.push(`${m.name}: WD ${d}까지 ${Number((needed-arrived).toFixed(3))}${m.unit} 반입 부족`);break;}}
   }
   const excluded=[...(f.schedule?.usage||[]),...(f.delivery?.arrivals||[])].filter(r=>r.included===false).length;if(excluded)warnings.push('미산정·제외 '+excluded+'행을 제외한 부분 계획입니다.');
+  if(periodProgress)warnings.push('WD '+f.schedule.progress.asOfDay+' 가상 진행 기준. 기간별 균등·정수 반올림 사용 가정이며 일별 사용량 합계는 첨부 계획량과 같습니다.');
   warnings.push('품목·규격·길이·단위별 재고를 구분합니다. 적치 면적은 관측 밀도 또는 슬롯 비율 가정이며 실측 면적이 아닙니다. 반입일은 첨부 계획대로 고정합니다.');
   return {state:p,errors:[...new Set(errors)],warnings,resources};
  }
  function audit(state,E,confirmed){if(!state.filePlanning?.enabled)return E.audit(state,confirmed);const c=compile(state,E),a=E.audit(c.state,confirmed);return {errors:[...new Set([...c.errors,...a.errors])],warnings:[...c.warnings,...a.warnings]};}
  function calculate(state,E,options){
   if(!state.filePlanning?.enabled)return E.calculate(state,320);const c=compile(state,E);if(c.errors.length)return {error:c.errors.join('\n'),warnings:c.warnings};
-  const result=E.calculateMO(c.state,options);if(result.error)return {...result,warnings:[...c.warnings,...(result.warnings||[])]};
+  const result=E.calculateMO(c.state,options);
+  if(result.warnings)result.warnings=result.warnings.map(w=>w.replace('작업 수요는 시작일에 일괄 공급합니다.',state.filePlanning.schedule?.progress?'작업 기간에 따라 자재 사용량을 나누어 공급합니다.':'작업 수요는 시작일에 일괄 공급합니다.').replace('3열×2깊이',state.planningScope?.enabled?'4열×4깊이 중 경계 안 유효':'3열×2깊이'));
+  if(result.error)return {...result,warnings:[...c.warnings,...(result.warnings||[])]};
   function display(r){if(!r)return r;const meta=id=>c.state.materials[id];return {...r,skuMoves:Object.entries(r.moves).map(([id,quantity])=>({...meta(id),quantity})),moves:{rebar:0,formwork:0,shoring:0},events:r.events.map(e=>({...e,resource:e.material,material:meta(e.material).group,unit:meta(e.material).unit})),snapshots:r.snapshots.map(s=>({...s,lots:s.lots.map(l=>({...l,resource:l.type,type:meta(l.type).group,unit:meta(l.type).unit}))}))};}
   return {...result,baseline:display(result.baseline),front:result.front.map(display),representatives:result.representatives.map(display),warnings:[...c.warnings,...result.warnings],documentRevision:state.filePlanning.revision};
  }
@@ -221,7 +261,7 @@
  function cancelCalculation(){if(!calculationJob)return;const job=calculationJob;calculationJob=null;clearTimeout(job.timer);job.worker.terminate();job.reject(Object.assign(Error('입력이 변경되어 이전 계산을 중단했습니다.'),{cancelled:true}));}
  function calculateAsync(state,E){
   if(!state.filePlanning?.enabled||typeof Worker==='undefined')return Promise.resolve(calculate(state,E));
-  cancelCalculation();return new Promise((resolve,reject)=>{const worker=new Worker('./planning-worker.js?v=54bd26a63e0f');const finish=(error,value)=>{clearTimeout(job.timer);worker.terminate();if(calculationJob===job)calculationJob=null;error?reject(error):resolve(value);};const job={worker,reject,timer:setTimeout(()=>finish(Error('대안 계산 시간이 초과했습니다. 입력 행 또는 반입 단위를 확인해 주세요.')),120000)};calculationJob=job;worker.onmessage=e=>e.data.error?finish(Error(e.data.error)):finish(null,e.data.result);worker.onerror=()=>finish(Error('배치 계산을 시작하지 못했습니다. 새로고침 후 다시 계산해 주세요.'));worker.postMessage({state:{...state,image:'',results:null}});});
+  cancelCalculation();return new Promise((resolve,reject)=>{const worker=new Worker('./planning-worker.js?v=bf443dc9dbf3');const finish=(error,value)=>{clearTimeout(job.timer);worker.terminate();if(calculationJob===job)calculationJob=null;error?reject(error):resolve(value);};const job={worker,reject,timer:setTimeout(()=>finish(Error('대안 계산 시간이 초과했습니다. 입력 행 또는 반입 단위를 확인해 주세요.')),120000)};calculationJob=job;worker.onmessage=e=>e.data.error?finish(Error(e.data.error)):finish(null,e.data.result);worker.onerror=()=>finish(Error('배치 계산을 시작하지 못했습니다. 새로고침 후 다시 계산해 주세요.'));worker.postMessage({state:{...state,image:'',results:null}});});
  }
- return {norm,num,day,unit,csv,xlsx,read,parseBook,parseMapped,mapping,resolve,normalizeAI,key,sync,compile,audit,calculate,calculateAsync,cancelCalculation};
+ return {portions,progressDocument,norm,num,day,unit,csv,xlsx,read,parseBook,parseMapped,mapping,resolve,normalizeAI,key,sync,compile,audit,calculate,calculateAsync,cancelCalculation};
 });

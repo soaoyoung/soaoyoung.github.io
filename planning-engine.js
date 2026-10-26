@@ -17,11 +17,11 @@
   function slotsFor(zones){
     const slots=[];
     for(const z of zones.filter(z=>z.type==='storage'&&z.confirmed)){
-      const b=bbox(z.polygon),front=z.front||'south';
-      for(let col=0;col<3;col++)for(let depth=0;depth<2;depth++){
+      const b=bbox(z.polygon),front=z.front||'south',cols=z.slotColumns||3,depths=z.slotDepths||2;
+      for(let col=0;col<cols;col++)for(let depth=0;depth<depths;depth++){
         let x,y,w,h;
-        if(front==='west'||front==='east'){w=b.w/2;h=b.h/3;x=b.x+(front==='west'?depth:1-depth)*w;y=b.y+col*h;}
-        else{w=b.w/3;h=b.h/2;x=b.x+col*w;y=b.y+(front==='north'?depth:1-depth)*h;}
+        if(front==='west'||front==='east'){w=b.w/depths;h=b.h/cols;x=b.x+(front==='west'?depth:depths-1-depth)*w;y=b.y+col*h;}
+        else{w=b.w/cols;h=b.h/depths;x=b.x+col*w;y=b.y+(front==='north'?depth:depths-1-depth)*h;}
         let poly=rect(x+1,y+1,w-2,h-2);
         if(!contained(poly,z.polygon)){
           const c=[x+w/2,y+h/2];if(!inside(c,z.polygon,false))continue;
