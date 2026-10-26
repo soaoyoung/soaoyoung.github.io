@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'sha256-1gJ6Iy+Eu7kJi4azHplMN8z+gQZIH7KWpz4+18+kg1Y=' 'sha256-TQhyiiTyeIK8JFWyaoM+yt0yjywJ/e5NL2QsVw5sIlc=' 'sha256-oRnAuHoGqGxwZUFAgR2l/wveHXsgICus7uPTlsW8ZUA=' 'sha256-l2NwqRGz76mE30dLTypx2LGKNXBmJRXl1/HmOz+dzjc=' 'sha256-A8hLWaSIqfWaJLI1ppEeUnRWMICuiw7+UaPFxxIZ3Po=' 'sha256-gdpIPXca/jbzE4LEAK7Ffv+Zx4pOubJKCb9ukCC2tsg=' 'sha256-xSAYcCMomHhsUVWyBQbrZwIuceb1+8DFB/NuCAUeUHA=' 'sha256-8fCPktI9RmQEHEGUdDXLCXbJhvfWOlgaKF4xVNC3PAg=' 'sha256-07lM59dhCmQugk6PS/LdeP7oeiXD7eaSx7R7rEYVqbA=' 'sha256-LkP4/BX9TjRxGVpHkliKwqNuGqow0SR+mK7B5E85YTM=' 'sha256-IDRM4EMq2Znq6wZ7Cz103X5gfo+ilex8KXgt0uqtVKY=' 'sha256-SofQtGFMZ2qVICXVfjczepAIVWdHP4cSgfXiaUblz/Y='; style-src 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://factchat.mindlogic-kr-api.com; worker-src 'self'; font-src 'self' data: blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'sha256-1gJ6Iy+Eu7kJi4azHplMN8z+gQZIH7KWpz4+18+kg1Y=' 'sha256-TQhyiiTyeIK8JFWyaoM+yt0yjywJ/e5NL2QsVw5sIlc=' 'sha256-oRnAuHoGqGxwZUFAgR2l/wveHXsgICus7uPTlsW8ZUA=' 'sha256-l2NwqRGz76mE30dLTypx2LGKNXBmJRXl1/HmOz+dzjc=' 'sha256-A8hLWaSIqfWaJLI1ppEeUnRWMICuiw7+UaPFxxIZ3Po=' 'sha256-gdpIPXca/jbzE4LEAK7Ffv+Zx4pOubJKCb9ukCC2tsg=' 'sha256-xSAYcCMomHhsUVWyBQbrZwIuceb1+8DFB/NuCAUeUHA=' 'sha256-8fCPktI9RmQEHEGUdDXLCXbJhvfWOlgaKF4xVNC3PAg=' 'sha256-07lM59dhCmQugk6PS/LdeP7oeiXD7eaSx7R7rEYVqbA=' 'sha256-LkP4/BX9TjRxGVpHkliKwqNuGqow0SR+mK7B5E85YTM=' 'sha256-IDRM4EMq2Znq6wZ7Cz103X5gfo+ilex8KXgt0uqtVKY=' 'sha256-3qVeFMPPy6/5iZHacQGAqUta0hA5xLHPRVzXRNmjqbs='; style-src 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://factchat.mindlogic-kr-api.com; worker-src 'self'; font-src 'self' data: blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="theme-color" content="#173f37">
   <title>SMART MATERIAL · 자재 반입 및 배치 대시보드</title>
   <meta name="description" content="현장 탑뷰와 공정표를 연결하여 자재 반입, 야적 배치와 대안을 비교하는 SMART MATERIAL 대시보드.">
@@ -771,6 +771,11 @@ footer,body[data-view=dashboard] footer{border-top-color:#ffffffce;color:#5f7d68
 @media(prefers-reduced-motion:reduce){.comparison-map animateMotion{display:none}.material-footprint{transition:none}}
 
 body:not(.scoped-planning) .comparison-heading,body:not(.scoped-planning) .compare-metrics,body:not(.scoped-planning) .scenario-control,body:not(.scoped-planning) .comparison-maps,body:not(.scoped-planning) .comparison-actions,body:not(.scoped-planning) .comparison-detail,body:not(.scoped-planning) .comparison-changes,body:not(.scoped-planning) .actual-move-caption,body:not(.scoped-planning) .review-toolbar{display:none}
+
+.scoped-planning [data-yard-label="S-07"]{transform:translateX(78px)}
+.scoped-planning .observation-stage #inspectorBody>h3{grid-column:1/-1;margin:10px 0 3px;font-size:17px}
+.scoped-planning .observation-stage #inspectorBody>.review-material-detail{grid-column:1/3}
+.scoped-planning #reviewGoPlanning{align-self:end}
 </style><style id="document-planning-theme">
 #legacyPlanningInputs{display:none!important}
 #notice{display:none!important}
@@ -2187,7 +2192,7 @@ window.FIELD_PROJECT = {"version":1,"siteId":"seongseong-ppt-2026-10","demo":tru
       const label=target?z.name:yard?z.id:'';
       out+='<polygon data-review-zone="'+esc(z.id)+'" data-yard="'+(yard?esc(z.id):'')+'" points="'+points(z.polygon)+'" fill="'+(closed?'url(#closed-'+uid+')':c)+'" fill-opacity="'+(closed?'.9':target?'.2':yard?'.07':'.015')+'" stroke="'+c+'" stroke-opacity="'+(main?'.75':'.15')+'" stroke-width="'+(target?'1.6':'.8')+'" '+(yard?'stroke-dasharray="4 3"':'')+'/>';
       if(label&&(!forReview||showLabels)){const [x,y0]=E.center(z.polygon),y=y0*ratio()/1000;
-        out+=target?'<g class="map-building-label" pointer-events="none"><rect x="'+(x-25)+'" y="'+(y-10)+'" width="50" height="21" rx="5" fill="#205c45" stroke="#fff"/><text x="'+x+'" y="'+(y+5)+'" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">'+esc(label)+'</text></g>':'<text x="'+x+'" y="'+(y-12)+'" class="yard-label" pointer-events="none">'+esc(label)+(closed?' 사용 종료':'')+'</text>';
+        out+=target?'<g class="map-building-label" pointer-events="none"><rect x="'+(x-25)+'" y="'+(y-10)+'" width="50" height="21" rx="5" fill="#205c45" stroke="#fff"/><text x="'+x+'" y="'+(y+5)+'" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">'+esc(label)+'</text></g>':'<text data-yard-label="'+esc(z.id)+'" x="'+x+'" y="'+(y-12)+'" class="yard-label" pointer-events="none">'+esc(label)+(closed?' 사용 종료':'')+'</text>';
       }
     }
     for(const c of state.cranes||[]){if(!(c.serves||[]).some(id=>targets.has(id)))continue;const x=c.pos[0],y=c.pos[1]*ratio()/1000;
