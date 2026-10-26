@@ -1,1 +1,1 @@
-importScripts('./planning-engine.js?v=03c84b59a488','./plan-documents.js?v=8ebafcb3fbbe');self.onmessage=function(event){try{self.postMessage({result:self.FieldDocuments.calculate(event.data.state,self.FieldEngine)});}catch(e){self.postMessage({error:String(e.message||'계산 실패')});}};
+importScripts('./planning-engine.js?v=03c84b59a488','./plan-documents.js?v=52ed3861e68c');self.onmessage=function(event){try{self.postMessage({result:self.FieldDocuments.calculate(event.data.state,self.FieldEngine)});}catch(e){self.postMessage({error:String(e.message||'계산 실패')});}};
